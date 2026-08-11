@@ -1,6 +1,6 @@
 // Cachea la app entera en la primera visita. A partir de ahi abre sin conexion,
 // y si hay red busca una version nueva en segundo plano.
-const CACHE = "planos-v1";
+const CACHE = "planos-v2";
 const FILES = ["./", "./index.html", "./manifest.webmanifest",
                "./icon-180.png", "./icon-192.png", "./icon-512.png"];
 
