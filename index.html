@@ -1,0 +1,751 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Planos">
+<meta name="theme-color" content="#111318">
+<title>Planos · Regla AR</title>
+<style>
+  :root{
+    --bg:#f5f5f7; --panel:#fff; --ink:#1c1c1e; --dim:#6b6b70; --line:#d8d8dd;
+    --accent:#ff8b3d; --wall:#8a8a90; --floor:#c9b393; --glass:#8ecbf0;
+    --sel:#ff8b3d; --furn:#b7bcc4;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{ --bg:#111318; --panel:#1c1f26; --ink:#f2f2f5; --dim:#9a9aa2; --line:#31353f;
+           --wall:#6d7178; --floor:#7d6a4e; --furn:#5d636e; }
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent}
+  html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);color:var(--ink);
+    font:15px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif}
+  #app{display:flex;flex-direction:column;height:100%;
+    padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)}
+
+  header{display:flex;align-items:center;gap:8px;padding:10px 12px;background:var(--panel);
+    border-bottom:1px solid var(--line);flex:0 0 auto}
+  header h1{font-size:16px;margin:0;font-weight:600;flex:1;white-space:nowrap;
+    overflow:hidden;text-overflow:ellipsis}
+  .btn{border:1px solid var(--line);background:var(--panel);color:var(--ink);
+    border-radius:10px;padding:7px 11px;font-size:14px;font-weight:500;cursor:pointer;
+    display:inline-flex;align-items:center;gap:5px;white-space:nowrap}
+  .btn:active{transform:scale(.96)}
+  .btn.on{background:var(--accent);border-color:var(--accent);color:#fff}
+  .btn.danger{color:#e0524a}
+
+  #stage{flex:1;position:relative;min-height:0;touch-action:none}
+  canvas{display:block;width:100%;height:100%;touch-action:none}
+
+  #hint{position:absolute;left:50%;transform:translateX(-50%);bottom:10px;
+    background:rgba(0,0,0,.68);color:#fff;padding:6px 12px;border-radius:999px;
+    font-size:12.5px;pointer-events:none;max-width:92%;text-align:center}
+
+  #tools{position:absolute;left:0;right:0;bottom:0;padding:10px 12px 14px;
+    background:linear-gradient(to top,var(--panel) 72%,transparent);
+    display:none;gap:8px;justify-content:center;flex-wrap:wrap}
+  #tools.show{display:flex}
+  #tools .lbl{width:100%;text-align:center;font-size:12.5px;color:var(--dim);margin-bottom:2px}
+
+  #empty{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;
+    justify-content:center;gap:14px;padding:28px;text-align:center;color:var(--dim)}
+  #empty h2{color:var(--ink);margin:0;font-size:19px}
+  #empty p{margin:0;max-width:30em;font-size:14px}
+
+  dialog{border:none;border-radius:16px;padding:0;background:var(--panel);color:var(--ink);
+    max-width:min(560px,94vw);width:100%;max-height:82vh}
+  dialog::backdrop{background:rgba(0,0,0,.45)}
+  .sheet-head{display:flex;align-items:center;gap:8px;padding:14px 16px;
+    border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--panel)}
+  .sheet-head h3{margin:0;font-size:16px;flex:1}
+  .sheet-body{padding:12px 16px 18px;overflow:auto;max-height:70vh}
+  .cat{font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--dim);
+    margin:14px 0 7px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(112px,1fr));gap:8px}
+  .item{border:1px solid var(--line);border-radius:11px;padding:9px;background:transparent;
+    color:var(--ink);text-align:left;cursor:pointer}
+  .item:active{background:var(--line)}
+  .item b{display:block;font-size:13px;font-weight:600}
+  .item span{font-size:11.5px;color:var(--dim)}
+  .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px}
+</style>
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="icon" href="icon-192.png">
+<link rel="manifest" href="manifest.webmanifest">
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1 id="title">Planos</h1>
+    <button class="btn" id="bHelp">?</button>
+    <button class="btn" id="bUnit">m</button>
+    <button class="btn" id="bView">3D</button>
+    <button class="btn" id="bMenu">···</button>
+  </header>
+
+  <div id="stage">
+    <canvas id="cv"></canvas>
+
+    <div id="empty">
+      <h2>Sin plano abierto</h2>
+      <p>Exporta un plano desde Regla AR con <b>“Exportar a la app web”</b> y ábrelo aquí.
+         Queda guardado en este dispositivo: no caduca y no hay que reinstalar nada.</p>
+      <button class="btn on" id="bOpen2">Abrir un plano</button>
+      <button class="btn" id="bHelp2">Cómo se hace</button>
+    </div>
+
+    <div id="hint"></div>
+
+    <div id="tools">
+      <div class="lbl" id="selLabel"></div>
+      <button class="btn" data-act="rotL">⟲ 15°</button>
+      <button class="btn" data-act="rotR">⟳ 15°</button>
+      <button class="btn" data-act="smaller">− tamaño</button>
+      <button class="btn" data-act="bigger">+ tamaño</button>
+      <button class="btn danger" data-act="del">Eliminar</button>
+      <button class="btn" data-act="done">Listo</button>
+    </div>
+  </div>
+</div>
+
+<input type="file" id="file" accept=".json,application/json" hidden>
+
+<dialog id="dlgMenu">
+  <div class="sheet-head"><h3>Plano</h3><button class="btn" data-close>Cerrar</button></div>
+  <div class="sheet-body">
+    <div class="row">
+      <button class="btn" id="bOpen">Abrir plano (.json)</button>
+      <button class="btn" id="bAdd">Añadir mueble</button>
+    </div>
+    <div class="row">
+      <button class="btn" id="bSave">Guardar copia (.json)</button>
+      <button class="btn danger" id="bClear">Cerrar plano</button>
+    </div>
+    <p style="color:var(--dim);font-size:13px;margin-top:16px">
+      Los cambios se guardan solos en este dispositivo. Para llevarlos de vuelta a
+      Regla AR, usa <b>Guardar copia</b>.
+    </p>
+  </div>
+</dialog>
+
+<dialog id="dlgHelp">
+  <div class="sheet-head"><h3>Cómo se usa</h3><button class="btn" data-close>Cerrar</button></div>
+  <div class="sheet-body">
+    <p style="margin-top:0">Esta app no caduca ni hay que reinstalarla. Regla AR sigue
+      haciendo lo que solo ella puede: <b>medir y escanear</b>. Esta se encarga del plano.</p>
+
+    <div class="cat">Traer un plano · una sola vez por habitación</div>
+    <ol style="padding-left:20px;margin:0;line-height:1.75">
+      <li>En <b>Regla AR</b>, abre la habitación.</li>
+      <li>Menú <b>Compartir</b> → <b>“Exportar a la app web”</b>.</li>
+      <li>En el cuadro de compartir, elige <b>Guardar en Archivos</b>.</li>
+      <li>Aquí, toca <b>Abrir un plano</b> y elige ese archivo.</li>
+    </ol>
+    <p style="color:var(--dim);font-size:13px">A partir de ahí queda guardado solo. No hace
+      falta repetirlo salvo que vuelvas a escanear.</p>
+
+    <div class="cat">Los otros botones de exportación de Regla AR</div>
+    <table style="width:100%;border-collapse:collapse;font-size:13.5px">
+      <tr><td style="padding:6px 8px 6px 0;vertical-align:top"><b>Exportar a la app web</b></td>
+          <td style="padding:6px 0;color:var(--dim)">El plano completo, para abrirlo aquí. Es el único que trae mobiliario y aberturas.</td></tr>
+      <tr><td style="padding:6px 8px 6px 0;vertical-align:top"><b>Exportar USDZ (ver en AR)</b></td>
+          <td style="padding:6px 0;color:var(--dim)">Se abre en realidad aumentada desde Archivos, <b>sin ninguna app instalada</b>. Ideal para ver la habitación a tamaño real cuando quieras.</td></tr>
+      <tr><td style="padding:6px 8px 6px 0;vertical-align:top"><b>Exportar DXF</b></td>
+          <td style="padding:6px 0;color:var(--dim)">Para AutoCAD y similares. Solo 2D.</td></tr>
+      <tr><td style="padding:6px 8px 6px 0;vertical-align:top"><b>Exportar OBJ / DAE</b></td>
+          <td style="padding:6px 0;color:var(--dim)">Malla 3D para SketchUp, Blender y otros programas de modelado.</td></tr>
+      <tr><td style="padding:6px 8px 6px 0;vertical-align:top"><b>Compartir escaneo original</b></td>
+          <td style="padding:6px 0;color:var(--dim)">El USDZ crudo del escaneo, sin tus ediciones ni el mobiliario.</td></tr>
+      <tr><td style="padding:6px 8px 6px 0;vertical-align:top"><b>Exportar PDF / JPG</b></td>
+          <td style="padding:6px 0;color:var(--dim)">El plano dibujado, para imprimir o enviar.</td></tr>
+    </table>
+
+    <div class="cat">Aquí dentro</div>
+    <ul style="padding-left:20px;margin:0;line-height:1.75">
+      <li><b>Toca un mueble</b> para seleccionarlo; arrástralo para moverlo.</li>
+      <li>Los muros lo frenan: no lo puedes sacar de la habitación.</li>
+      <li>Con uno seleccionado aparecen girar, tamaño y eliminar.</li>
+      <li><b>Pellizca</b> para acercar. Arrastra el fondo para desplazarte.</li>
+      <li><b>3D</b> muestra la habitación en volumen, sin los dos muros de delante.</li>
+      <li><b>m</b> cambia entre metros, centímetros y pies.</li>
+    </ul>
+
+    <div class="cat">Llevar los cambios de vuelta</div>
+    <p style="margin:0">Menú <b>···</b> → <b>Guardar copia</b>. Genera un archivo que puedes
+      guardar en Archivos o enviarte por correo.</p>
+
+    <div class="cat">Dejarla a mano</div>
+    <p style="margin:0">En Safari, <b>Compartir</b> → <b>Añadir a pantalla de inicio</b>.
+      Queda con su icono como cualquier app, y esta no caduca nunca.</p>
+  </div>
+</dialog>
+
+<dialog id="dlgLib">
+  <div class="sheet-head"><h3>Biblioteca</h3><button class="btn" data-close>Cerrar</button></div>
+  <div class="sheet-body" id="libBody"></div>
+</dialog>
+
+<script>
+"use strict";
+
+/* ───────────────────────── Biblioteca de mobiliario ─────────────────────────
+   Mismas medidas reales que FurnitureKind.swift: ancho × fondo × alto, metros. */
+const KINDS = [
+  ["silla","Silla",.45,.50,.90,"Living y comedor"],
+  ["sillon","Sillón",.85,.85,.80,"Living y comedor"],
+  ["sofa2","Sofá 2 cuerpos",1.60,.85,.80,"Living y comedor"],
+  ["sofa3","Sofá 3 cuerpos",2.10,.90,.80,"Living y comedor"],
+  ["mesaComedor","Mesa comedor",1.60,.90,.75,"Living y comedor"],
+  ["mesaCentro","Mesa de centro",1.10,.60,.42,"Living y comedor"],
+  ["escritorio","Escritorio",1.40,.70,.75,"Living y comedor"],
+  ["camaIndividual","Cama 1 plaza",.90,1.90,.50,"Dormitorio"],
+  ["camaMatrimonial","Cama 2 plazas",1.50,1.90,.50,"Dormitorio"],
+  ["camaKing","Cama king",2.00,2.00,.50,"Dormitorio"],
+  ["velador","Velador",.45,.40,.55,"Dormitorio"],
+  ["closet","Clóset",1.80,.60,2.20,"Dormitorio"],
+  ["estanteria","Estantería",.80,.35,1.80,"Dormitorio"],
+  ["comoda","Cómoda",1.00,.45,.80,"Dormitorio"],
+  ["refrigerador","Refrigerador",.70,.70,1.80,"Cocina"],
+  ["encimera","Mueble cocina",.60,.60,.90,"Cocina"],
+  ["lavaplatos","Lavaplatos",.60,.60,.90,"Cocina"],
+  ["lavadora","Lavadora",.60,.60,.85,"Cocina"],
+  ["horno","Horno",.60,.60,.60,"Cocina"],
+  ["inodoro","Inodoro",.38,.70,.78,"Baño"],
+  ["lavamanos","Lavamanos",.55,.45,.85,"Baño"],
+  ["ducha","Ducha",.90,.90,2.00,"Baño"],
+  ["tina","Tina",1.70,.75,.55,"Baño"],
+  ["tv55",'TV 55"',1.23,.08,.71,"Otros"],
+  ["alfombra","Alfombra",2.00,1.40,.01,"Otros"],
+  ["planta","Planta",.50,.50,1.20,"Otros"],
+];
+const CATS = ["Living y comedor","Dormitorio","Cocina","Baño","Otros"];
+
+/* ─────────────────────────────── Geometría ───────────────────────────────
+   Traducción directa de RoomModel.swift. Las mismas reglas dan los mismos
+   resultados: un mueble no puede atravesar un muro tampoco aquí. */
+
+const dist = (a,b)=>Math.hypot(a[0]-b[0], a[1]-b[1]);
+const sub  = (a,b)=>[a[0]-b[0], a[1]-b[1]];
+const add  = (a,b)=>[a[0]+b[0], a[1]+b[1]];
+const mul  = (a,k)=>[a[0]*k, a[1]*k];
+const len  = a=>Math.hypot(a[0],a[1]);
+
+/** Envolvente convexa (monotone chain), reserva cuando los muros no cierran. */
+function hull(pts){
+  if(pts.length < 3) return pts.slice();
+  const p = pts.slice().sort((u,v)=> u[0]-v[0] || u[1]-v[1]);
+  const cross=(o,a,b)=>(a[0]-o[0])*(b[1]-o[1])-(a[1]-o[1])*(b[0]-o[0]);
+  const chain=src=>{
+    const out=[];
+    for(const q of src){
+      while(out.length>=2 && cross(out[out.length-2],out[out.length-1],q)<=0) out.pop();
+      out.push(q);
+    }
+    out.pop(); return out;
+  };
+  return chain(p).concat(chain(p.slice().reverse()));
+}
+
+/** Contorno del suelo: encadena los muros extremo con extremo. */
+function floorOutline(walls){
+  const pts = walls.flatMap(w=>[w.a,w.b]);
+  if(walls.length < 3) return hull(pts);
+  const remaining = walls.map((_,i)=>i).slice(1);
+  const loop = [walls[0].a, walls[0].b];
+  const tol = 0.4;
+  while(remaining.length){
+    const end = loop[loop.length-1];
+    let best = null;
+    remaining.forEach((wi,slot)=>{
+      for(const [near,far] of [[walls[wi].a,walls[wi].b],[walls[wi].b,walls[wi].a]]){
+        const d = dist(end,near);
+        if(!best || d < best.d) best = {slot, far, d};
+      }
+    });
+    if(!best || best.d > tol) break;
+    remaining.splice(best.slot,1);
+    loop.push(best.far);
+  }
+  if(remaining.length) return hull(pts);
+  if(loop.length>3 && dist(loop[0],loop[loop.length-1])<tol) loop.pop();
+  return loop.length>=3 ? loop : hull(pts);
+}
+
+/** Punto dentro del polígono, por lanzamiento de rayo. */
+function contains(poly,p){
+  let inside=false;
+  for(let i=0,j=poly.length-1;i<poly.length;j=i++){
+    const a=poly[i], b=poly[j];
+    if((a[1]>p[1]) !== (b[1]>p[1])){
+      const x = a[0] + (p[1]-a[1])/(b[1]-a[1]) * (b[0]-a[0]);
+      if(p[0] < x) inside = !inside;
+    }
+  }
+  return inside;
+}
+
+/** Punto más cercano del borde del polígono. */
+function nearestOnBoundary(poly,p){
+  let best=null, bd=Infinity;
+  for(let i=0,j=poly.length-1;i<poly.length;j=i++){
+    const a=poly[j], b=poly[i];
+    const ab=sub(b,a), L2=ab[0]*ab[0]+ab[1]*ab[1];
+    let t = L2>0 ? ((p[0]-a[0])*ab[0] + (p[1]-a[1])*ab[1]) / L2 : 0;
+    t = Math.max(0,Math.min(1,t));
+    const q = add(a, mul(ab,t));
+    const d = dist(q,p);
+    if(d<bd){ bd=d; best=q; }
+  }
+  return best;
+}
+
+/** Esquinas del mueble ya rotadas. */
+function corners(f){
+  const c=Math.cos(f.yaw||0), s=Math.sin(f.yaw||0);
+  const hw=f.footprint[0]/2, hd=f.footprint[1]/2;
+  return [[-hw,-hd],[hw,-hd],[hw,hd],[-hw,hd]].map(([x,y])=>
+    [f.position[0] + x*c - y*s, f.position[1] + x*s + y*c]);
+}
+
+/** El embudo por el que pasa todo movimiento: devuelve el mueble metido
+    dentro de los muros, o null si no cabe de ninguna manera. */
+function fitted(plan, piece){
+  const outline = floorOutline(plan.walls||[]);
+  if(outline.length < 3) return piece;
+  let cand = {...piece, position: piece.position.slice()};
+  for(let k=0;k<6;k++){
+    const escaped = corners(cand).filter(c=>!contains(outline,c));
+    if(!escaped.length) return cand;
+    let push=[0,0];
+    for(const c of escaped){
+      const d = sub(nearestOnBoundary(outline,c), c);
+      if(len(d) > len(push)) push = d;
+    }
+    if(len(push) < 1e-9) break;
+    cand.position = add(cand.position, mul(push,1.02));
+  }
+  return corners(cand).every(c=>contains(outline,c)) ? cand : null;
+}
+
+/* ──────────────────────────────── Estado ──────────────────────────────── */
+const KEY="reglaar.plan.v1", KEYV="reglaar.view.v1";
+let plan=null, sel=null, mode="2d", unit="m";
+let cam={x:0,y:0,s:60};           // s = píxeles por metro
+const cv=document.getElementById("cv"), ctx=cv.getContext("2d");
+
+function save(){ if(plan) localStorage.setItem(KEY, JSON.stringify(plan)); }
+function load(){
+  try{ const t=localStorage.getItem(KEY); if(t) plan=JSON.parse(t); }catch(e){}
+  try{ const v=JSON.parse(localStorage.getItem(KEYV)||"{}");
+       if(v.unit) unit=v.unit; if(v.mode) mode=v.mode; }catch(e){}
+}
+function saveView(){ localStorage.setItem(KEYV, JSON.stringify({unit,mode})); }
+
+/* Unidades: metros, centímetros o pies. */
+function fmt(m){
+  if(unit==="cm") return Math.round(m*100)+" cm";
+  if(unit==="ft"){ const f=m*3.28084; const w=Math.floor(f);
+    const inch=Math.round((f-w)*12);
+    return inch===12 ? (w+1)+"′" : (inch? w+"′ "+inch+"″" : w+"′"); }
+  return m.toFixed(2)+" m";
+}
+function area(m2){
+  if(unit==="ft") return (m2*10.7639).toFixed(1)+" ft²";
+  return m2.toFixed(2)+" m²";
+}
+
+/* ───────────────────────────── Encuadre ───────────────────────────── */
+function bounds(){
+  const pts=[];
+  (plan.walls||[]).forEach(w=>{pts.push(w.a,w.b)});
+  (plan.furniture||[]).forEach(f=>corners(f).forEach(c=>pts.push(c)));
+  if(!pts.length) return null;
+  const xs=pts.map(p=>p[0]), ys=pts.map(p=>p[1]);
+  return {min:[Math.min(...xs),Math.min(...ys)], max:[Math.max(...xs),Math.max(...ys)]};
+}
+function fit(){
+  const b=bounds(); if(!b) return;
+  const w=b.max[0]-b.min[0], h=b.max[1]-b.min[1];
+  const pad=48, W=cv.clientWidth, H=cv.clientHeight;
+  cam.s = Math.min((W-pad*2)/Math.max(w,.5), (H-pad*2-70)/Math.max(h,.5));
+  cam.s = Math.max(8, Math.min(400, cam.s));
+  cam.x = (b.min[0]+b.max[0])/2;
+  cam.y = (b.min[1]+b.max[1])/2;
+}
+const toScreen = p => [ (p[0]-cam.x)*cam.s + cv.clientWidth/2,
+                        (p[1]-cam.y)*cam.s + cv.clientHeight/2 ];
+const toWorld  = q => [ (q[0]-cv.clientWidth/2)/cam.s + cam.x,
+                        (q[1]-cv.clientHeight/2)/cam.s + cam.y ];
+
+/* ───────────────────────────── Dibujo 2D ───────────────────────────── */
+function draw2D(){
+  const W=cv.clientWidth, H=cv.clientHeight;
+  const css = getComputedStyle(document.documentElement);
+  ctx.clearRect(0,0,W,H);
+
+  // Suelo
+  const outline = floorOutline(plan.walls||[]);
+  if(outline.length>=3){
+    ctx.beginPath();
+    outline.forEach((p,i)=>{ const s=toScreen(p); i?ctx.lineTo(s[0],s[1]):ctx.moveTo(s[0],s[1]); });
+    ctx.closePath();
+    ctx.fillStyle = css.getPropertyValue("--floor").trim()+"55";
+    ctx.fill();
+  }
+
+  // Muros
+  ctx.lineCap="butt";
+  ctx.strokeStyle = css.getPropertyValue("--wall").trim();
+  ctx.lineWidth = Math.max(3, .10*cam.s);
+  (plan.walls||[]).forEach(w=>{
+    const a=toScreen(w.a), b=toScreen(w.b);
+    ctx.beginPath(); ctx.moveTo(a[0],a[1]); ctx.lineTo(b[0],b[1]); ctx.stroke();
+  });
+
+  // Aberturas: la puerta abre un hueco, la ventana se pinta en azul
+  (plan.openings||[]).forEach(o=>{
+    const c=toScreen(o.center), ang=o.angle||0;
+    const half=o.width/2*cam.s;
+    ctx.save(); ctx.translate(c[0],c[1]); ctx.rotate(ang);
+    ctx.lineWidth = Math.max(3,.11*cam.s);
+    ctx.strokeStyle = o.kind==="window"
+      ? css.getPropertyValue("--glass").trim()
+      : css.getPropertyValue("--bg").trim();
+    ctx.beginPath(); ctx.moveTo(-half,0); ctx.lineTo(half,0); ctx.stroke();
+    if(o.kind==="door"){
+      ctx.strokeStyle=css.getPropertyValue("--dim").trim(); ctx.lineWidth=1.2;
+      ctx.beginPath(); ctx.arc(-half,0,half*2,0,-Math.PI/2,true); ctx.stroke();
+    }
+    ctx.restore();
+  });
+
+  // Mobiliario
+  (plan.furniture||[]).forEach(f=>{
+    const cs=corners(f).map(toScreen);
+    const on = f.id===sel;
+    ctx.beginPath();
+    cs.forEach((s,i)=> i?ctx.lineTo(s[0],s[1]):ctx.moveTo(s[0],s[1]));
+    ctx.closePath();
+    ctx.fillStyle = on ? css.getPropertyValue("--sel").trim()+"66"
+                       : css.getPropertyValue("--furn").trim()+"cc";
+    ctx.fill();
+    ctx.strokeStyle = on ? css.getPropertyValue("--sel").trim()
+                         : css.getPropertyValue("--dim").trim();
+    ctx.lineWidth = on?2.5:1.2; ctx.stroke();
+
+    if(cam.s>26){
+      const c=toScreen(f.position);
+      ctx.fillStyle=css.getPropertyValue("--ink").trim();
+      ctx.font="600 11px -apple-system,system-ui,sans-serif";
+      ctx.textAlign="center"; ctx.textBaseline="middle";
+      ctx.fillText(f.label||"", c[0], c[1]);
+    }
+  });
+
+  // Cotas de los muros
+  if(cam.s>22){
+    ctx.font="11px -apple-system,system-ui,sans-serif";
+    ctx.textAlign="center"; ctx.textBaseline="middle";
+    ctx.fillStyle=css.getPropertyValue("--dim").trim();
+    (plan.walls||[]).forEach(w=>{
+      const m=toScreen([(w.a[0]+w.b[0])/2,(w.a[1]+w.b[1])/2]);
+      ctx.fillText(fmt(dist(w.a,w.b)), m[0], m[1]-9);
+    });
+  }
+}
+
+/* ───────────────────────────── Dibujo 3D ─────────────────────────────
+   Proyección isométrica sobre canvas: sin librerías, funciona sin conexión
+   y no depende de WebGL. */
+const ISO=Math.PI/6;
+function iso(x,h,z){
+  return [ (x-z)*Math.cos(ISO)*cam.s + cv.clientWidth/2,
+           (x+z)*Math.sin(ISO)*cam.s - h*cam.s + cv.clientHeight/2 ];
+}
+function draw3D(){
+  const W=cv.clientWidth, H=cv.clientHeight;
+  const css=getComputedStyle(document.documentElement);
+  ctx.clearRect(0,0,W,H);
+
+  const faces=[];
+  const push=(pts,color,depth)=>faces.push({pts,color,depth});
+
+  // Suelo
+  const outline=floorOutline(plan.walls||[]);
+  if(outline.length>=3){
+    push(outline.map(p=>iso(p[0]-cam.x,0,p[1]-cam.y)),
+         css.getPropertyValue("--floor").trim(), -1e6);
+  }
+
+  const box=(cx,cz,w,d,h,yaw,base,color)=>{
+    const c=Math.cos(yaw||0), s=Math.sin(yaw||0);
+    const q=[[-w/2,-d/2],[w/2,-d/2],[w/2,d/2],[-w/2,d/2]]
+      .map(([x,z])=>[cx + x*c - z*s, cz + x*s + z*c]);
+    const depth = q.reduce((a,p)=>a+p[0]+p[1],0)/4;
+    // Caras laterales primero, tapa al final: el pintor las cubre en orden.
+    for(let i=0;i<4;i++){
+      const a=q[i], b=q[(i+1)%4];
+      push([iso(a[0]-cam.x,base,a[1]-cam.y), iso(b[0]-cam.x,base,b[1]-cam.y),
+            iso(b[0]-cam.x,base+h,b[1]-cam.y), iso(a[0]-cam.x,base+h,a[1]-cam.y)],
+           shade(color, i%2 ? .78 : .62), depth + i*1e-4);
+    }
+    push(q.map(p=>iso(p[0]-cam.x,base+h,p[1]-cam.y)), shade(color,1), depth+1e-3);
+  };
+
+  const wallH = plan.height>0.5 ? plan.height : 2.4;
+  // Centro de la planta, para saber qué muros quedan delante del observador.
+  const cen = outline.length
+    ? outline.reduce((a,p)=>[a[0]+p[0],a[1]+p[1]],[0,0]).map(v=>v/outline.length)
+    : [0,0];
+  (plan.walls||[]).forEach(w=>{
+    const cx=(w.a[0]+w.b[0])/2, cz=(w.a[1]+w.b[1])/2;
+    // En isométrica el frente es el mayor (x+z). Esos dos muros taparían todo el
+    // interior, así que se omiten: es la vista de casa de muñecas.
+    if((cx-cen[0]) + (cz-cen[1]) > 0.05) return;
+    const L=dist(w.a,w.b), yaw=Math.atan2(w.b[1]-w.a[1], w.b[0]-w.a[0]);
+    box(cx,cz,L,0.10,(w.height||wallH),yaw,0,css.getPropertyValue("--wall").trim());
+  });
+  (plan.furniture||[]).forEach(f=>{
+    box(f.position[0],f.position[1],f.footprint[0],f.footprint[1],
+        f.height||0.8, f.yaw||0, 0,
+        f.id===sel ? css.getPropertyValue("--sel").trim()
+                   : css.getPropertyValue("--furn").trim());
+  });
+
+  faces.sort((a,b)=>a.depth-b.depth);
+  for(const f of faces){
+    ctx.beginPath();
+    f.pts.forEach((p,i)=> i?ctx.lineTo(p[0],p[1]):ctx.moveTo(p[0],p[1]));
+    ctx.closePath();
+    ctx.fillStyle=f.color; ctx.fill();
+    ctx.strokeStyle="rgba(0,0,0,.18)"; ctx.lineWidth=.6; ctx.stroke();
+  }
+}
+function shade(hex,k){
+  const h=hex.replace("#","");
+  const n=parseInt(h.length===3 ? h.split("").map(c=>c+c).join("") : h,16);
+  const r=Math.round(((n>>16)&255)*k), g=Math.round(((n>>8)&255)*k), b=Math.round((n&255)*k);
+  return `rgb(${r},${g},${b})`;
+}
+
+/* ───────────────────────────── Render ───────────────────────────── */
+function resize(){
+  const r=devicePixelRatio||1;
+  cv.width=cv.clientWidth*r; cv.height=cv.clientHeight*r;
+  ctx.setTransform(r,0,0,r,0,0);
+  draw();
+}
+function draw(){
+  document.getElementById("empty").style.display = plan ? "none" : "flex";
+  if(!plan) { ctx.clearRect(0,0,cv.clientWidth,cv.clientHeight); return; }
+  mode==="3d" ? draw3D() : draw2D();
+  document.getElementById("title").textContent = plan.name || "Plano";
+  const t=document.getElementById("tools");
+  const s = (plan.furniture||[]).find(f=>f.id===sel);
+  t.classList.toggle("show", !!s);
+  if(s) document.getElementById("selLabel").textContent =
+    `${s.label} · ${fmt(s.footprint[0])} × ${fmt(s.footprint[1])}`;
+  hint();
+}
+function hint(){
+  const h=document.getElementById("hint");
+  if(!plan){ h.textContent=""; return; }
+  if(sel) h.textContent = mode==="3d" ? "Arrastra para mover · pellizca para acercar"
+                                      : "Arrastra el mueble · pellizca para acercar";
+  else {
+    const a = plan.measuredFloorArea>0 ? " · "+area(plan.measuredFloorArea) : "";
+    h.textContent = `${(plan.walls||[]).length} muros${a} · toca un mueble para editarlo`;
+  }
+}
+
+/* ───────────────────────────── Interacción ───────────────────────────── */
+let drag=null, pinch=null;
+
+function pick(q){
+  const w=toWorld(q);
+  const list=(plan.furniture||[]);
+  for(let i=list.length-1;i>=0;i--) if(contains(corners(list[i]), w)) return list[i].id;
+  return null;
+}
+
+cv.addEventListener("pointerdown",e=>{
+  if(!plan) return;
+  cv.setPointerCapture(e.pointerId);
+  const q=[e.offsetX,e.offsetY];
+  if(mode==="2d"){
+    const hit=pick(q);
+    if(hit){ sel=hit; const f=plan.furniture.find(x=>x.id===sel);
+             drag={id:hit, grab:sub(toWorld(q), f.position)}; draw(); return; }
+    sel=null;
+  }
+  drag={pan:true, from:q, cam:[cam.x,cam.y]};
+  draw();
+});
+cv.addEventListener("pointermove",e=>{
+  if(!drag||!plan) return;
+  const q=[e.offsetX,e.offsetY];
+  if(drag.pan){
+    cam.x = drag.cam[0] - (q[0]-drag.from[0])/cam.s;
+    cam.y = drag.cam[1] - (q[1]-drag.from[1])/cam.s;
+    draw(); return;
+  }
+  const f=plan.furniture.find(x=>x.id===drag.id); if(!f) return;
+  const want={...f, position: sub(toWorld(q), drag.grab)};
+  const ok=fitted(plan,want);            // los muros frenan aquí igual que en la app
+  if(ok){ Object.assign(f, ok); draw(); }
+});
+const stop=()=>{ if(drag && !drag.pan) save(); drag=null; };
+cv.addEventListener("pointerup",stop);
+cv.addEventListener("pointercancel",stop);
+
+// Pellizco para acercar
+cv.addEventListener("touchstart",e=>{
+  if(e.touches.length===2){
+    drag=null;
+    pinch={d:tdist(e), s:cam.s};
+  }
+},{passive:true});
+cv.addEventListener("touchmove",e=>{
+  if(pinch && e.touches.length===2){
+    e.preventDefault();
+    cam.s = Math.max(8, Math.min(400, pinch.s * tdist(e)/pinch.d));
+    draw();
+  }
+},{passive:false});
+cv.addEventListener("touchend",()=>{ pinch=null; },{passive:true});
+const tdist=e=>Math.hypot(e.touches[0].clientX-e.touches[1].clientX,
+                          e.touches[0].clientY-e.touches[1].clientY);
+cv.addEventListener("wheel",e=>{
+  if(!plan) return; e.preventDefault();
+  cam.s = Math.max(8, Math.min(400, cam.s * (e.deltaY<0?1.1:0.9)));
+  draw();
+},{passive:false});
+
+/* Controles del mueble seleccionado. Girar y crecer también mueven las
+   esquinas, así que ambos pasan por fitted: si no cabe, no se aplica. */
+document.getElementById("tools").addEventListener("click",e=>{
+  const act=e.target.dataset.act; if(!act) return;
+  if(act==="done"){ sel=null; draw(); return; }
+  const i=(plan.furniture||[]).findIndex(f=>f.id===sel); if(i<0) return;
+  if(act==="del"){ plan.furniture.splice(i,1); sel=null; save(); draw(); return; }
+  const f=plan.furniture[i];
+  let cand={...f, position:f.position.slice(), footprint:f.footprint.slice()};
+  if(act==="rotL") cand.yaw=(cand.yaw||0)-Math.PI/12;
+  if(act==="rotR") cand.yaw=(cand.yaw||0)+Math.PI/12;
+  if(act==="smaller"||act==="bigger"){
+    const k=act==="bigger"?1.1:0.9;
+    const nx=cand.footprint[0]*k, ny=cand.footprint[1]*k;
+    if(nx<=0.05||nx>=12||ny<=0.05||ny>=12) return;
+    cand.footprint=[nx,ny]; cand.height=(cand.height||0.8)*k;
+  }
+  const ok=fitted(plan,cand);
+  if(!ok) return;                       // no cabe: se rechaza entero, no a medias
+  plan.furniture[i]=ok; save(); draw();
+});
+
+/* ───────────────────────────── Biblioteca ───────────────────────────── */
+function buildLib(){
+  const body=document.getElementById("libBody"); body.innerHTML="";
+  for(const cat of CATS){
+    const items=KINDS.filter(k=>k[5]===cat); if(!items.length) continue;
+    const h=document.createElement("div"); h.className="cat"; h.textContent=cat;
+    body.appendChild(h);
+    const g=document.createElement("div"); g.className="grid";
+    for(const [id,title,w,d,ht] of items){
+      const b=document.createElement("button"); b.className="item";
+      b.innerHTML=`<b>${title}</b><span>${fmt(w)} × ${fmt(d)}</span>`;
+      b.onclick=()=>{ insert(id,title,w,d,ht); dlgLib.close(); };
+      g.appendChild(b);
+    }
+    body.appendChild(g);
+  }
+}
+function insert(kind,label,w,d,h){
+  const b=bounds();
+  const c = b ? [(b.min[0]+b.max[0])/2,(b.min[1]+b.max[1])/2] : [0,0];
+  const piece={ id:uuid(), label, kind, position:c, yaw:0, footprint:[w,d], height:h };
+  const ok=fitted(plan,piece);
+  if(!ok){ alert("No cabe en esta habitación."); return; }
+  (plan.furniture=plan.furniture||[]).push(ok);
+  sel=ok.id; save(); draw();
+}
+const uuid=()=> (crypto.randomUUID ? crypto.randomUUID().toUpperCase()
+  : "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g,c=>{
+      const r=Math.random()*16|0; return (c==="x"?r:(r&3|8)).toString(16);
+    }).toUpperCase());
+
+/* ───────────────────────── Abrir y guardar ───────────────────────── */
+document.getElementById("file").addEventListener("change",async e=>{
+  const f=e.target.files[0]; if(!f) return;
+  try{
+    const data=JSON.parse(await f.text());
+    if(!data.walls && !data.furniture) throw new Error("formato");
+    plan=data; sel=null; fit(); save(); draw();
+  }catch(err){
+    alert("Ese archivo no parece un plano de Regla AR.");
+  }
+  e.target.value="";
+});
+function download(){
+  const blob=new Blob([JSON.stringify(plan,null,2)],{type:"application/json"});
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(blob);
+  a.download=(plan.name||"plano").replace(/\//g,"-")+".reglaar.json";
+  a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href),2000);
+}
+
+/* ───────────────────────────── Cableado ───────────────────────────── */
+const dlgMenu=document.getElementById("dlgMenu"), dlgLib=document.getElementById("dlgLib"),
+      dlgHelp=document.getElementById("dlgHelp");
+document.querySelectorAll("[data-close]").forEach(b=>b.onclick=()=>b.closest("dialog").close());
+document.getElementById("bMenu").onclick=()=>dlgMenu.showModal();
+document.getElementById("bHelp").onclick=()=>dlgHelp.showModal();
+document.getElementById("bHelp2").onclick=()=>dlgHelp.showModal();
+
+// Arrastrar el archivo sobre la ventana también lo abre (en el Mac).
+addEventListener("dragover",e=>e.preventDefault());
+addEventListener("drop",e=>{
+  e.preventDefault();
+  const f=e.dataTransfer.files[0]; if(!f) return;
+  const dt=new DataTransfer(); dt.items.add(f);
+  const input=document.getElementById("file");
+  input.files=dt.files; input.dispatchEvent(new Event("change"));
+});
+document.getElementById("bOpen").onclick=()=>{ dlgMenu.close(); file.click(); };
+document.getElementById("bOpen2").onclick=()=>file.click();
+document.getElementById("bAdd").onclick=()=>{
+  if(!plan){ alert("Abre un plano primero."); return; }
+  dlgMenu.close(); buildLib(); dlgLib.showModal();
+};
+document.getElementById("bSave").onclick=()=>{ dlgMenu.close(); download(); };
+document.getElementById("bClear").onclick=()=>{
+  if(!confirm("¿Cerrar el plano? Se borra de este dispositivo.")) return;
+  localStorage.removeItem(KEY); plan=null; sel=null; dlgMenu.close(); draw();
+};
+document.getElementById("bUnit").onclick=e=>{
+  unit = unit==="m" ? "cm" : unit==="cm" ? "ft" : "m";
+  e.target.textContent=unit; saveView(); draw();
+};
+document.getElementById("bView").onclick=e=>{
+  mode = mode==="2d" ? "3d" : "2d";
+  e.target.textContent = mode==="2d" ? "3D" : "2D";
+  e.target.classList.toggle("on", mode==="3d");
+  sel=null; saveView(); draw();
+};
+
+addEventListener("resize",resize);
+load();
+document.getElementById("bUnit").textContent=unit;
+document.getElementById("bView").textContent = mode==="2d" ? "3D" : "2D";
+document.getElementById("bView").classList.toggle("on", mode==="3d");
+requestAnimationFrame(()=>{ resize(); if(plan) fit(); draw(); });
+</script>
+<script>
+if ("serviceWorker" in navigator) {
+  addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(()=>{}));
+}
+</script>
+</body>
+</html>
